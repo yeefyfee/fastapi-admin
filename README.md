@@ -239,39 +239,62 @@ print(resp.status_code, resp.json())
 # → 201 {"id":"...","email":"alice@example.com",...}
 ```
 
-**客户端加密 (JavaScript/Node)：**
+**客户端加密 (Vue 3)：**
 
 ```javascript
-const crypto = require('crypto');
+// utils/crypto.js — 加密工具函数
+const SERVER_KEY = 'dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE='
 
-// 1. 加载与服务端相同的密钥
-const SERVER_KEY = Buffer.from('dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=', 'base64');
+export async function encryptRequest(payload) {
+  const key = Uint8Array.from(atob(SERVER_KEY), c => c.charCodeAt(0))
+  const plainBytes = new TextEncoder().encode(JSON.stringify(payload))
+  const nonce = crypto.getRandomValues(new Uint8Array(12))
 
-// 2. 准备明文请求体
-const plainBody = JSON.stringify({
-    email: 'alice@example.com',
-    password: 'secret123',
+  // AES-256-GCM 加密
+  const cryptoKey = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt'])
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: nonce }, cryptoKey, plainBytes
+  )
+
+  // 拼接 nonce + ciphertext(含tag) → Base64
+  const combined = new Uint8Array(nonce.length + ciphertext.byteLength)
+  combined.set(nonce)
+  combined.set(new Uint8Array(ciphertext), nonce.length)
+  return btoa(String.fromCharCode(...combined))
+}
+
+// components/LoginForm.vue
+<script setup>
+import { ref } from 'vue'
+import { encryptRequest } from '@/utils/crypto'
+
+const email = ref('')
+const password = ref('')
+
+async function handleRegister() {
+  const encryptedBody = await encryptRequest({
+    email: email.value,
+    password: password.value,
     full_name: 'Alice'
-});
+  })
 
-// 3. 加密: nonce(12字节) + ciphertext (AES-256-GCM)
-const nonce = crypto.randomBytes(12);
-const cipher = crypto.createCipheriv('aes-256-gcm', SERVER_KEY, nonce);
-const encrypted = Buffer.concat([cipher.update(plainBody, 'utf8'), cipher.final()]);
-const tag = cipher.getAuthTag();
-
-// 4. Base64 编码发送 (nonce + ciphertext + tag)
-const encryptedBody = Buffer.concat([nonce, encrypted, tag]).toString('base64');
-
-// 5. 发送加密请求
-fetch('http://localhost:8000/api/v1/auth/register', {
+  const res = await fetch('http://localhost:8000/api/v1/auth/register', {
     method: 'POST',
     body: encryptedBody,
-    headers: {
-        'X-Encrypted': 'true',
-        'Content-Type': 'text/plain'
-    }
-}).then(r => r.json()).then(console.log);
+    headers: { 'X-Encrypted': 'true', 'Content-Type': 'text/plain' }
+  })
+  const data = await res.json()
+  console.log(data) // → { id: "...", email: "alice@example.com", ... }
+}
+</script>
+
+<template>
+  <form @submit.prevent="handleRegister">
+    <input v-model="email" type="email" placeholder="邮箱" />
+    <input v-model="password" type="password" placeholder="密码" />
+    <button type="submit">加密注册</button>
+  </form>
+</template>
 ```
 
 **不加密的正常请求**（`ENCRYPTION_KEY` 为空或请求不带 `X-Encrypted` 头）：照常发送 JSON，中间件透传不做任何处理。业务模块无需感知加密层。
