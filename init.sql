@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS auth_roles (
     name        VARCHAR(64)  NOT NULL,
     description VARCHAR(256) NOT NULL DEFAULT '',
     is_system   BOOLEAN      NOT NULL DEFAULT FALSE,
-    tenant_id   VARCHAR(64)  REFERENCES auth_tenants(slug),
+    tenant_id  UUID REFERENCES auth_tenants(id),
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS demo_articles (
     title      VARCHAR(256) NOT NULL,
     content    TEXT         NOT NULL DEFAULT '',
     author_id  UUID         NOT NULL REFERENCES auth_users(id),
-    tenant_id  VARCHAR(64)  REFERENCES auth_tenants(slug),
+    tenant_id  UUID REFERENCES auth_tenants(id),
     created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
