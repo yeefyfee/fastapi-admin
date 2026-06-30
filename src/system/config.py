@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     LOG_LEVEL: str = "INFO"
 
+    # Request body encryption (32-byte key for AES-256-GCM)
+    ENCRYPTION_KEY: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

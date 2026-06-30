@@ -8,6 +8,7 @@ from src.system.logging import setup_logging
 from src.system.health import router as health_router
 from src.base.auth.router import router as auth_router
 from src.base.tenant.middleware import TenantMiddleware
+from src.base.crypto.middleware import CryptoMiddleware
 from src.base.tenant.service import get_or_create_default_tenant
 from src.db.session import async_session_factory
 from src.rbac.models import Role, RolePermission
@@ -91,6 +92,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(TenantMiddleware)
+
+# 请求体加解密（可选，ENCRYPTION_KEY 为空时自动跳过）
+encryption_key = settings.ENCRYPTION_KEY
+if encryption_key:
+    import base64
+    key_bytes = base64.b64decode(encryption_key) if len(encryption_key) == 44 else encryption_key.encode().ljust(32, b'\0')[:32]
+    app.add_middleware(CryptoMiddleware, key=key_bytes[:32])
 
 # ---- Core Routers (always loaded) ----
 app.include_router(health_router)
