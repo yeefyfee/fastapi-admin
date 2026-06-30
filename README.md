@@ -151,37 +151,38 @@ curl http://localhost:8000/api/v1/rbac/permissions \
 ### 用例 4: 多租户 API 调用
 
 ```bash
-# 在请求头中指定租户
+# 在请求头中指定租户（UUID 格式）
 curl http://localhost:8000/api/v1/rbac/roles \
   -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-ID: tenant-001"
+  -H "X-Tenant-ID: 550e8400-e29b-41d4-a716-446655440000"
 
 # 不同租户的数据自动隔离
 curl http://localhost:8000/api/v1/rbac/roles \
   -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-ID: tenant-002"
-# → 返回 tenant-002 的角色列表，看不到 tenant-001 的数据
+  -H "X-Tenant-ID: 660e8400-e29b-41d4-a716-446655440001"
+# → 返回租户 660e8400 的角色列表，看不到 550e8400 的数据
 ```
 
 ### 用例 5: 示例业务模块（文章管理）
 
 ```bash
 # 创建文章（自动绑定当前用户为作者，租户隔离）
+# 默认租户 UUID 在 seed 时自动生成，可通过 GET /api/v1/rbac/roles 响应中推断
 curl -X POST http://localhost:8000/api/v1/demo/articles \
   -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-ID: default" \
+  -H "X-Tenant-ID: <tenant-uuid>" \
   -H "Content-Type: application/json" \
   -d '{"title":"Hello World","content":"第一篇文章"}'
 
 # 查看文章列表（自动过滤当前租户）
 curl http://localhost:8000/api/v1/demo/articles \
   -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-ID: default"
+  -H "X-Tenant-ID: <tenant-uuid>"
 
 # 查看单篇文章
 curl http://localhost:8000/api/v1/demo/articles/<article_id> \
   -H "Authorization: Bearer $TOKEN" \
-  -H "X-Tenant-ID: default"
+  -H "X-Tenant-ID: <tenant-uuid>"
 ```
 
 ---
@@ -219,7 +220,7 @@ src/my_biz/
 | 表名 | 说明 |
 |------|------|
 | `auth_users` | 平台用户（全局） |
-| `auth_tenants` | 租户 |
+| `auth_tenants` | 租户（UUID 主键，slug 为可读别名） |
 | `auth_roles` | 角色定义 |
 | `auth_permissions` | 权限定义 |
 | `auth_role_permissions` | 角色-权限关联 |

@@ -59,7 +59,7 @@ class MyModel(Base, TimestampMixin, TenantFilter):
 |------|------|
 | `Base` | SQLAlchemy DeclarativeBase |
 | `TimestampMixin` | `id` (UUID), `created_at`, `updated_at` |
-| `TenantFilter` | `tenant_id` (String, nullable, indexed) |
+| `TenantFilter` | `tenant_id` (UUID FK → auth_tenants.id) |
 
 ### 2.2 表命名规范
 
