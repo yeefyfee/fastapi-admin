@@ -181,22 +181,28 @@ async def list_all(
 
 ---
 
-## 6. 请求体加密
+## 6. 请求体加解密（双向 AES-256-GCM）
 
-平台支持可选的请求体 AES-256-GCM 加密。在 `.env` 中配置 `ENCRYPTION_KEY` 即可启用。
+平台支持可选的请求/响应双向 AES-256-GCM 加解密。在 `.env` 中配置 `ENCRYPTION_KEY` 即可启用。
 
-### 6.1 客户端加密模式
+### 6.1 加解密流程
 
 ```
-Client: JSON body → AES-256-GCM encrypt → Base64 → HTTP body
-        + 请求头 X-Encrypted: true
-Server: CryptoMiddleware → decrypt → 注入原始 JSON → 路由正常处理
+请求方向（客户端 → 服务端）:
+  Client: JSON body → AES-256-GCM encrypt → Base64 → HTTP body + X-Encrypted: true
+  Server: CryptoMiddleware → decrypt → 注入原始 JSON → 路由正常处理
+
+响应方向（服务端 → 客户端）:
+  Server: JSON response → AES-256-GCM encrypt → Base64 → HTTP body + X-Encrypted: true
+  Client: Base64 decode → AES-256-GCM decrypt → 原始 JSON
 ```
+
+**触发条件**：请求头 `X-Encrypted: true` 同时触发请求解密和响应加密。不带此头的请求正常透传。
 
 ### 6.2 配置
 
 ```bash
-# 生成密钥
+# 生成 32 字节密钥
 python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
 
 # .env 中设置
@@ -204,6 +210,47 @@ ENCRYPTION_KEY=dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=
 ```
 
 留空则不启用加密，所有请求照常处理。
+
+### 6.3 客户端加解密示例
+
+```python
+import json, base64, os, requests
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+KEY = base64.b64decode("dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=")
+aesgcm = AESGCM(KEY)
+
+# ── 加密请求 ──
+def encrypt_body(payload: dict) -> str:
+    plain = json.dumps(payload).encode()
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, plain, None)
+    return base64.b64encode(nonce + ciphertext).decode()
+
+# ── 解密响应 ──
+def decrypt_response(encrypted: str) -> dict:
+    raw = base64.b64decode(encrypted)
+    nonce, ciphertext = raw[:12], raw[12:]
+    plain = aesgcm.decrypt(nonce, ciphertext, None)
+    return json.loads(plain)
+
+# ── 完整调用 ──
+encrypted = encrypt_body({"email": "alice@example.com", "password": "secret123"})
+resp = requests.post("http://localhost:8000/api/v1/auth/register",
+    data=encrypted,
+    headers={"X-Encrypted": "true", "Content-Type": "text/plain"})
+
+# 解密服务端响应
+result = decrypt_response(resp.text)
+print(result)  # → {"id":"...","email":"alice@example.com",...}
+```
+
+### 6.4 注意事项
+
+- 响应体只在请求带 `X-Encrypted: true` 头且 HTTP 状态码 < 400 时才加密；错误响应（4xx/5xx）明文返回便于调试
+- 加密响应 Content-Type 变为 `text/plain`（Base64 字符串），调用方需自行解密
+- 每个请求使用独立的随机 nonce（12 字节），防重放
+- 流式响应（`StreamingResponse`）和文件下载不支持加密，直接透传
 
 ---
 

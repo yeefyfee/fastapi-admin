@@ -1,13 +1,21 @@
 """
-请求体加解密中间件。
+请求体加解密中间件（双向 AES-256-GCM）。
+
+请求方向:
+  Client: JSON → encrypt → Base64 → HTTP body + X-Encrypted: true
+  Server: decrypt → 注入原始 JSON → 路由处理
+
+响应方向:
+  Server: JSON → encrypt → Base64 → HTTP body
+  Client: Base64 decode → decrypt → 原始 JSON
 
 触发条件：请求头 X-Encrypted: true
-解密失败返回 400，透传非加密请求。
+解密/加密失败返回 400/500，透传非加密请求。
 """
 import json
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from src.base.crypto.cipher import RequestCrypto
 
 
@@ -17,32 +25,50 @@ class CryptoMiddleware(BaseHTTPMiddleware):
         self.crypto = RequestCrypto(key)
 
     async def dispatch(self, request: Request, call_next):
-        if request.headers.get("X-Encrypted", "").lower() != "true":
-            return await call_next(request)
+        encrypted = request.headers.get("X-Encrypted", "").lower() == "true"
 
-        if request.method in ("GET", "HEAD", "OPTIONS"):
-            return await call_next(request)
+        # ── 请求解密 ──
+        if encrypted and request.method not in ("GET", "HEAD", "OPTIONS"):
+            try:
+                raw_body = await request.body()
+                if raw_body:
+                    plaintext = self.crypto.decrypt(raw_body.decode())
 
-        try:
-            raw_body = await request.body()
-            if not raw_body:
-                return await call_next(request)
+                    async def receive():
+                        return {"type": "http.request", "body": plaintext, "more_body": False}
 
-            encrypted_text = raw_body.decode()
-            plaintext = self.crypto.decrypt(encrypted_text)
-            body_json = json.loads(plaintext)
+                    request._receive = receive
+                    request._body = plaintext
+                    request.state.decrypted_body = json.loads(plaintext)
+            except Exception:
+                return JSONResponse(
+                    {"detail": "请求解密失败，请检查加密密钥是否匹配"},
+                    status_code=400,
+                )
 
-            # 构造带解密后 body 的新请求
-            async def receive():
-                return {"type": "http.request", "body": plaintext, "more_body": False}
+        response = await call_next(request)
 
-            request._receive = receive
-            request._body = plaintext
-            request.state.decrypted_body = body_json
-        except Exception:
-            return JSONResponse(
-                {"detail": "请求解密失败，请检查加密密钥是否匹配"},
-                status_code=400,
-            )
+        # ── 响应加密 ──
+        if encrypted and response.status_code < 400:
+            try:
+                body = b""
+                # 读取响应体
+                if hasattr(response, "body"):
+                    body = response.body
+                else:
+                    async for chunk in response.body_iterator:
+                        body += chunk
 
-        return await call_next(request)
+                encrypted_body = self.crypto.encrypt(body)
+                return Response(
+                    content=encrypted_body,
+                    status_code=response.status_code,
+                    headers={**dict(response.headers), "X-Encrypted": "true", "content-type": "text/plain"},
+                )
+            except Exception:
+                return JSONResponse(
+                    {"detail": "响应加密失败"},
+                    status_code=500,
+                )
+
+        return response

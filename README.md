@@ -186,7 +186,7 @@ curl http://localhost:8000/api/v1/demo/articles/<article_id> \
   -H "X-Tenant-ID: <tenant-uuid>"
 ```
 
-### 用例 6: 请求体加密（AES-256-GCM）
+### 用例 6: 请求体加解密（双向 AES-256-GCM）
 
 **服务端配置：**
 
@@ -202,99 +202,80 @@ echo 'ENCRYPTION_KEY=dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=' >> .env
 docker-compose restart app
 ```
 
-**客户端加密 (Python)：**
+**请求头 `X-Encrypted: true` 同时触发请求解密和响应加密。**
+
+**客户端加解密 (Python)：**
 
 ```python
 import json, base64, os, requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# 1. 加载与服务端相同的密钥
 SERVER_KEY = base64.b64decode("dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=")
-
-# 2. 准备明文请求体
-plain_body = json.dumps({
-    "email": "alice@example.com",
-    "password": "secret123",
-    "full_name": "Alice"
-}).encode()
-
-# 3. 加密: nonce(12字节) + ciphertext
 aesgcm = AESGCM(SERVER_KEY)
-nonce = os.urandom(12)
-ciphertext = aesgcm.encrypt(nonce, plain_body, None)
 
-# 4. Base64 编码发送
-encrypted_body = base64.b64encode(nonce + ciphertext).decode()
+def encrypt_body(payload: dict) -> str:
+    """明文 JSON → AES-256-GCM → Base64"""
+    plain = json.dumps(payload).encode()
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, plain, None)
+    return base64.b64encode(nonce + ciphertext).decode()
 
-# 5. 发送加密请求
-resp = requests.post(
-    "http://localhost:8000/api/v1/auth/register",
-    data=encrypted_body,
-    headers={
-        "X-Encrypted": "true",
-        "Content-Type": "text/plain"
-    }
-)
-print(resp.status_code, resp.json())
-# → 201 {"id":"...","email":"alice@example.com",...}
+def decrypt_body(encrypted: str) -> dict:
+    """Base64 → AES-256-GCM 解密 → 原始 JSON"""
+    raw = base64.b64decode(encrypted)
+    nonce, ciphertext = raw[:12], raw[12:]
+    return json.loads(aesgcm.decrypt(nonce, ciphertext, None))
+
+# ── 发送加密请求 + 解密响应 ──
+resp = requests.post("http://localhost:8000/api/v1/auth/register",
+    data=encrypt_body({"email": "alice@example.com", "password": "secret123", "full_name": "Alice"}),
+    headers={"X-Encrypted": "true", "Content-Type": "text/plain"})
+
+result = decrypt_body(resp.text)
+print(result)  # → {"id":"...","email":"alice@example.com","is_active":true,...}
 ```
 
-**客户端加密 (Vue 3)：**
+**客户端加解密 (Vue 3)：**
 
 ```javascript
-// utils/crypto.js — 加密工具函数
+// utils/crypto.js
 const SERVER_KEY = 'dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE='
 
+async function importKey() {
+  const raw = Uint8Array.from(atob(SERVER_KEY), c => c.charCodeAt(0))
+  return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt'])
+}
+
 export async function encryptRequest(payload) {
-  const key = Uint8Array.from(atob(SERVER_KEY), c => c.charCodeAt(0))
-  const plainBytes = new TextEncoder().encode(JSON.stringify(payload))
+  const key = await importKey()
+  const plain = new TextEncoder().encode(JSON.stringify(payload))
   const nonce = crypto.getRandomValues(new Uint8Array(12))
-
-  // AES-256-GCM 加密
-  const cryptoKey = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt'])
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: nonce }, cryptoKey, plainBytes
-  )
-
-  // 拼接 nonce + ciphertext(含tag) → Base64
-  const combined = new Uint8Array(nonce.length + ciphertext.byteLength)
-  combined.set(nonce)
-  combined.set(new Uint8Array(ciphertext), nonce.length)
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plain)
+  const combined = new Uint8Array(nonce.length + ct.byteLength)
+  combined.set(nonce); combined.set(new Uint8Array(ct), nonce.length)
   return btoa(String.fromCharCode(...combined))
 }
 
-// components/LoginForm.vue
-<script setup>
-import { ref } from 'vue'
-import { encryptRequest } from '@/utils/crypto'
+export async function decryptResponse(encrypted) {
+  const key = await importKey()
+  const raw = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0))
+  const nonce = raw.slice(0, 12), ciphertext = raw.slice(12)
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ciphertext)
+  return JSON.parse(new TextDecoder().decode(plain))
+}
 
-const email = ref('')
-const password = ref('')
+// components/LoginForm.vue — 使用示例
+import { encryptRequest, decryptResponse } from '@/utils/crypto'
 
 async function handleRegister() {
-  const encryptedBody = await encryptRequest({
-    email: email.value,
-    password: password.value,
-    full_name: 'Alice'
-  })
-
-  const res = await fetch('http://localhost:8000/api/v1/auth/register', {
-    method: 'POST',
-    body: encryptedBody,
+  const body = await encryptRequest({ email: email.value, password: password.value })
+  const res = await fetch('/api/v1/auth/register', {
+    method: 'POST', body,
     headers: { 'X-Encrypted': 'true', 'Content-Type': 'text/plain' }
   })
-  const data = await res.json()
+  const data = await decryptResponse(await res.text())
   console.log(data) // → { id: "...", email: "alice@example.com", ... }
 }
-</script>
-
-<template>
-  <form @submit.prevent="handleRegister">
-    <input v-model="email" type="email" placeholder="邮箱" />
-    <input v-model="password" type="password" placeholder="密码" />
-    <button type="submit">加密注册</button>
-  </form>
-</template>
 ```
 
 **不加密的正常请求**（`ENCRYPTION_KEY` 为空或请求不带 `X-Encrypted` 头）：照常发送 JSON，中间件透传不做任何处理。业务模块无需感知加密层。

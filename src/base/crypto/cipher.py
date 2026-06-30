@@ -1,9 +1,13 @@
 """
-请求体加密/解密工具（AES-256-GCM）。
+请求体加密/解密工具（AES-256-GCM 双向）。
 
-流程：
+请求方向:
   Client: JSON → AES-GCM encrypt → Base64 → HTTP body + X-Encrypted: true
   Server: middleware decrypt → 注入原始 JSON → FastAPI routes 正常处理
+
+响应方向:
+  Server: JSON response → AES-GCM encrypt → Base64 → HTTP body + X-Encrypted: true
+  Client: Base64 decode → AES-GCM decrypt → 原始 JSON
 """
 import base64
 import os
