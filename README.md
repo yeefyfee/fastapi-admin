@@ -186,27 +186,95 @@ curl http://localhost:8000/api/v1/demo/articles/<article_id> \
   -H "X-Tenant-ID: <tenant-uuid>"
 ```
 
-### 用例 6: 请求体加密
+### 用例 6: 请求体加密（AES-256-GCM）
+
+**服务端配置：**
 
 ```bash
-# 服务端启用：.env 中设置 ENCRYPTION_KEY=<32字节Base64密钥>
-# 客户端加密请求
-python -c "
+# 生成 32 字节密钥
+python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
+# → dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=  (示例)
+
+# 写入 .env
+echo 'ENCRYPTION_KEY=dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=' >> .env
+
+# 重启服务
+docker-compose restart app
+```
+
+**客户端加密 (Python)：**
+
+```python
 import json, base64, os, requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-key = base64.b64decode('YOUR_BASE64_KEY_HERE')
-aesgcm = AESGCM(key)
-body = json.dumps({'email':'alice@example.com','password':'secret123'}).encode()
-nonce = os.urandom(12)
-encrypted = base64.b64encode(nonce + aesgcm.encrypt(nonce, body, None)).decode()
+# 1. 加载与服务端相同的密钥
+SERVER_KEY = base64.b64decode("dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=")
 
-resp = requests.post('http://localhost:8000/api/v1/auth/register',
-    data=encrypted,
-    headers={'X-Encrypted': 'true', 'Content-Type': 'text/plain'})
-print(resp.json())
-"
+# 2. 准备明文请求体
+plain_body = json.dumps({
+    "email": "alice@example.com",
+    "password": "secret123",
+    "full_name": "Alice"
+}).encode()
+
+# 3. 加密: nonce(12字节) + ciphertext
+aesgcm = AESGCM(SERVER_KEY)
+nonce = os.urandom(12)
+ciphertext = aesgcm.encrypt(nonce, plain_body, None)
+
+# 4. Base64 编码发送
+encrypted_body = base64.b64encode(nonce + ciphertext).decode()
+
+# 5. 发送加密请求
+resp = requests.post(
+    "http://localhost:8000/api/v1/auth/register",
+    data=encrypted_body,
+    headers={
+        "X-Encrypted": "true",
+        "Content-Type": "text/plain"
+    }
+)
+print(resp.status_code, resp.json())
+# → 201 {"id":"...","email":"alice@example.com",...}
 ```
+
+**客户端加密 (JavaScript/Node)：**
+
+```javascript
+const crypto = require('crypto');
+
+// 1. 加载与服务端相同的密钥
+const SERVER_KEY = Buffer.from('dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=', 'base64');
+
+// 2. 准备明文请求体
+const plainBody = JSON.stringify({
+    email: 'alice@example.com',
+    password: 'secret123',
+    full_name: 'Alice'
+});
+
+// 3. 加密: nonce(12字节) + ciphertext (AES-256-GCM)
+const nonce = crypto.randomBytes(12);
+const cipher = crypto.createCipheriv('aes-256-gcm', SERVER_KEY, nonce);
+const encrypted = Buffer.concat([cipher.update(plainBody, 'utf8'), cipher.final()]);
+const tag = cipher.getAuthTag();
+
+// 4. Base64 编码发送 (nonce + ciphertext + tag)
+const encryptedBody = Buffer.concat([nonce, encrypted, tag]).toString('base64');
+
+// 5. 发送加密请求
+fetch('http://localhost:8000/api/v1/auth/register', {
+    method: 'POST',
+    body: encryptedBody,
+    headers: {
+        'X-Encrypted': 'true',
+        'Content-Type': 'text/plain'
+    }
+}).then(r => r.json()).then(console.log);
+```
+
+**不加密的正常请求**（`ENCRYPTION_KEY` 为空或请求不带 `X-Encrypted` 头）：照常发送 JSON，中间件透传不做任何处理。业务模块无需感知加密层。
 
 ---
 
