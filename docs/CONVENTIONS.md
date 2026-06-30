@@ -1,6 +1,6 @@
 # 新业务模块对接规范
 
-> 本文档说明如何在企业级通用基础架构平台上开发新的业务模块。
+> 本文档说明如何在通用基础架构平台上开发新的业务模块。
 
 ## 快速开始（3 步接入）
 
@@ -181,9 +181,35 @@ async def list_all(
 
 ---
 
-## 6. 权限注册
+## 6. 请求体加密
 
-### 6.1 定义新权限
+平台支持可选的请求体 AES-256-GCM 加密。在 `.env` 中配置 `ENCRYPTION_KEY` 即可启用。
+
+### 6.1 客户端加密模式
+
+```
+Client: JSON body → AES-256-GCM encrypt → Base64 → HTTP body
+        + 请求头 X-Encrypted: true
+Server: CryptoMiddleware → decrypt → 注入原始 JSON → 路由正常处理
+```
+
+### 6.2 配置
+
+```bash
+# 生成密钥
+python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"
+
+# .env 中设置
+ENCRYPTION_KEY=dGhpcyBpcyBhIDMyLWJ5dGUgQVMyNTYgR0NNIGtleSE=
+```
+
+留空则不启用加密，所有请求照常处理。
+
+---
+
+## 7. 权限注册
+
+### 7.1 定义新权限
 
 在 `src/main.py` 的 `lifespan()` 中找到 `seed_permissions` 列表，添加新权限：
 
@@ -197,7 +223,7 @@ seed_permissions = [
 ]
 ```
 
-### 6.2 分配权限给角色
+### 7.2 分配权限给角色
 
 在同一处 `default_roles` 中：
 
@@ -214,7 +240,7 @@ seed_permissions = [
 
 ---
 
-## 7. 数据库迁移
+## 8. 数据库迁移
 
 ```bash
 # 1. 确保 models 已导入 alembic/env.py
@@ -229,7 +255,7 @@ alembic upgrade head
 
 ---
 
-## 8. 事件通信（模块间解耦）
+## 9. 事件通信（模块间解耦）
 
 ```python
 from src.base.events.bus import EventBus
@@ -246,13 +272,13 @@ async def on_order_created(payload: dict):
 
 ---
 
-## 9. 完整示例
+## 10. 完整示例
 
 参考 `src/demo/` — 一个完整的文章管理模块，演示了所有上述规范的实际使用。
 
 ---
 
-## 10. 注意事项
+## 11. 注意事项
 
 | 禁止 | 正确做法 |
 |------|----------|

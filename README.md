@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">Enterprise Platform</h1>
-  <p align="center">基于 FastAPI 的企业级通用基础架构平台</p>
+  <p align="center">基于 FastAPI 的通用基础架构平台</p>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
 
 ## 概述
 
-**Enterprise Platform** 是一个模块化单体的企业级 API 基座。它提供开箱即用的鉴权、RBAC 权限管理、多租户隔离和事件总线，使后续业务线只需关注业务逻辑，无需重复开发基础设施。
+**Enterprise Platform** 是一个模块化单体的 API 基座。它提供开箱即用的鉴权、RBAC 权限管理、多租户隔离和事件总线，使后续业务线只需关注业务逻辑，无需重复开发基础设施。
 
 ### 核心能力
 
@@ -26,6 +26,7 @@
 | 🏢 **Tenant** | 多租户行级隔离、`X-Tenant-ID` 头自动透传、`TenantFilter` Mixin |
 | 📡 **Event Bus** | 内存异步事件总线，`emit()`/`on()` 模块间解耦通信 |
 | 🔌 **Discovery** | 业务模块自动发现 — 创建目录即注册，零 `main.py` 改动 |
+| 🔒 **Crypto** | 请求体 AES-256-GCM 加密（可选，`X-Encrypted: true` 头触发） |
 | 📊 **System** | 配置管理 (Pydantic Settings)、结构化日志 (structlog)、健康检查 |
 
 ---
@@ -183,6 +184,28 @@ curl http://localhost:8000/api/v1/demo/articles \
 curl http://localhost:8000/api/v1/demo/articles/<article_id> \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-Tenant-ID: <tenant-uuid>"
+```
+
+### 用例 6: 请求体加密
+
+```bash
+# 服务端启用：.env 中设置 ENCRYPTION_KEY=<32字节Base64密钥>
+# 客户端加密请求
+python -c "
+import json, base64, os, requests
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+key = base64.b64decode('YOUR_BASE64_KEY_HERE')
+aesgcm = AESGCM(key)
+body = json.dumps({'email':'alice@example.com','password':'secret123'}).encode()
+nonce = os.urandom(12)
+encrypted = base64.b64encode(nonce + aesgcm.encrypt(nonce, body, None)).decode()
+
+resp = requests.post('http://localhost:8000/api/v1/auth/register',
+    data=encrypted,
+    headers={'X-Encrypted': 'true', 'Content-Type': 'text/plain'})
+print(resp.json())
+"
 ```
 
 ---

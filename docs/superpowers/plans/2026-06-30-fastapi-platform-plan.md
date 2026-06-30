@@ -1,4 +1,4 @@
-# 企业级通用基础架构平台 — 实现计划
+# 通用基础架构平台 — 实现计划
 
 > **用于 Agentic Workers:** 必需子技能: 使用 `subagent-driven-development`（推荐）或 `executing-plans` 逐任务实现此计划。步骤使用 `- [ ]` 勾选语法追踪。
 
