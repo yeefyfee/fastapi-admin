@@ -26,7 +26,20 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("JWT_SECRET_KEY must be changed from default value")
     if settings.JWT_SECRET_KEY == "change-me-in-production":
         logger.warning("JWT_SECRET_KEY is using default value — change before production deployment")
-    app.state.redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+    # 自动执行数据库迁移（FastAPI Cloud / 无 Docker CMD 环境）
+    import subprocess, sys
+    try:
+        subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True, capture_output=True)
+        logger.info("database migrations applied")
+    except Exception as e:
+        logger.warning("migration skipped or failed", error=str(e))
+
+    try:
+        app.state.redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    except Exception as e:
+        logger.warning("redis connection failed", error=str(e))
+        app.state.redis = None
 
     # 初始化默认租户 + 系统角色
     async with async_session_factory() as db:
@@ -73,7 +86,8 @@ async def lifespan(app: FastAPI):
             pass
 
     yield
-    await app.state.redis.close()
+    if app.state.redis:
+        await app.state.redis.close()
     logger.info("shutting down")
 
 
