@@ -24,8 +24,10 @@ if _db_url.startswith("postgresql://"):
 elif _db_url.startswith("postgres://"):
     _db_url = _db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 
-# asyncpg 不认识 Neon 查询参数（?sslmode=require&channel_binding=require）
-_db_url = re.sub(r'\?.*$', '', _db_url)
+# 处理 Neon / 云端 PostgreSQL 的 psycopg2 专属参数，转换为 asyncpg 兼容格式
+_db_url = re.sub(r'[?&]sslmode=\w+', '', _db_url)
+_db_url = re.sub(r'[?&]channel_binding=\w+', '', _db_url)
+_db_url = re.sub(r'\?&', '?', _db_url)
 
 config.set_main_option("sqlalchemy.url", _db_url)
 
