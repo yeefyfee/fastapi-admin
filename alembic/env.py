@@ -13,6 +13,7 @@ from src.base.tenant.models import Tenant  # noqa: F401
 from src.rbac.models import Role, Permission, RolePermission, UserRole  # noqa: F401
 from src.demo.models import Article  # noqa: F401
 from src.system.config import settings
+import re
 
 target_metadata = Base.metadata
 
@@ -22,6 +23,9 @@ if _db_url.startswith("postgresql://"):
     _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 elif _db_url.startswith("postgres://"):
     _db_url = _db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+# asyncpg 不认识 sslmode 参数（Neon 连接串会带 ?sslmode=require）
+_db_url = re.sub(r'\?sslmode=\w+', '', _db_url)
 
 config.set_main_option("sqlalchemy.url", _db_url)
 
