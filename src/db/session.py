@@ -9,8 +9,8 @@ if _db_url.startswith("postgresql://"):
 elif _db_url.startswith("postgres://"):
     _db_url = _db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 
-# asyncpg 不认识 sslmode 参数（Neon 连接串会带 ?sslmode=require）
-_db_url = re.sub(r'\?sslmode=\w+', '', _db_url)
+# asyncpg 不认识 Neon 查询参数（?sslmode=require&channel_binding=require）
+_db_url = re.sub(r'\?.*$', '', _db_url)
 
 engine = create_async_engine(_db_url, echo=settings.APP_ENV == "development")
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
